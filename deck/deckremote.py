@@ -22,7 +22,9 @@ STRINGS = {
         "client": "PC: {ip}",
         "client_generic": "PC connected",
         "waiting": "● Waiting for PC…",
-        "waiting_help": "On your PC, open USBip and attach\n{ip}  →  usbip-vudc.0  (DeckRemote)",
+        "waiting_help": "On your PC, open USBip and attach\n{ip}  →  {bus}  ({device})",
+        "mode_xbox": "Xbox 360 mode",
+        "mode_generic": "Generic mode",
         "off": "● Not sharing",
         "off_help": "Couldn't start the virtual controller ({err}).",
         "pad": "Controller: {name}",
@@ -37,7 +39,9 @@ STRINGS = {
         "client": "PC: {ip}",
         "client_generic": "PC conectado",
         "waiting": "● Esperando al PC…",
-        "waiting_help": "En el PC, abre USBip y conecta\n{ip}  →  usbip-vudc.0  (DeckRemote)",
+        "waiting_help": "En el PC, abre USBip y conecta\n{ip}  →  {bus}  ({device})",
+        "mode_xbox": "Modo Xbox 360",
+        "mode_generic": "Modo genérico",
         "off": "● Sin compartir",
         "off_help": "No se pudo activar el mando virtual ({err}).",
         "pad": "Mando: {name}",
@@ -123,11 +127,44 @@ def client_ip():
 
 
 class Pad:
-    def __init__(self):
-        self.state = {"link": "off", "client": None, "pad": None}
+    """Reads Steam's virtual gamepad and feeds the virtual USB gamepad.
+
+    mode "xbox":    Xbox 360 controller (XInput, rumble) via xinput.py on dummy_hcd + usbip-host.
+    mode "generic": plain HID gamepad on usbip-vudc (/dev/hidg0).
+    """
+    def __init__(self, mode="xbox"):
+        self.mode = mode
+        self.state = {"link": "off", "client": None, "pad": None, "busid": None, "mode": mode}
         self.running = True
         self.gc = None
         self.fd = None
+        self.xdev = None
+        self.rumble = (0, 0)          # requested by the PC (0..255 strong, weak)
+        self.rumble_sent = (0, 0, 0.0)
+
+    def set_rumble(self, strong, weak):
+        self.rumble = (strong, weak)
+
+    def start(self):
+        if self.mode == "xbox":
+            out = helper("up-xbox")
+            if out.startswith("up-xbox"):
+                import xinput
+                self.state["busid"] = out.split()[1] if len(out.split()) > 1 else None
+                self.xdev = xinput.XInputDevice(bind=lambda: helper("bind"), on_rumble=self.set_rumble)
+                try:
+                    self.xdev.start()
+                    return
+                except OSError:
+                    self.xdev = None
+                    helper("down")
+            self.mode = self.state["mode"] = "generic"  # helper too old or raw-gadget missing
+        helper("up")
+        self.state["busid"] = "usbip-vudc.0"
+
+    def stop(self):
+        if self.xdev:
+            self.xdev.stop()
 
     def pick_controller(self):
         for i in range(sdl.SDL_NumJoysticks()):
@@ -150,18 +187,41 @@ class Pad:
         c = lambda v: max(-32767, v)
         return struct.pack("<HBhhhhBB", b, hat, c(ax[0]), c(ax[1]), c(ax[2]), c(ax[3]), lt, rt)
 
+    def xinput_report(self):
+        import xinput
+        g = self.gc
+        buttons = {i: sdl.SDL_GameControllerGetButton(g, i) for i in xinput.SDL_TO_XINPUT}
+        axes = tuple(sdl.SDL_GameControllerGetAxis(g, a) for a in range(6))
+        return xinput.report(buttons, axes)
+
+    def apply_rumble(self, now):
+        """Mirror the PC's rumble on the Deck. XInput holds a level until changed; SDL rumble
+        expires, so it is re-armed while non-zero."""
+        strong, weak = self.rumble
+        if not self.gc:
+            return
+        last_s, last_w, last_t = self.rumble_sent
+        if (strong, weak) != (last_s, last_w) or ((strong or weak) and now - last_t > 0.5):
+            sdl.SDL_GameControllerRumble(self.gc, strong * 257, weak * 257, 1000 if (strong or weak) else 0)
+            self.rumble_sent = (strong, weak, now)
+
     def loop(self):
         load_sdl()
+        sdl.SDL_GameControllerRumble.argtypes = [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint16, ctypes.c_uint32]
         sdl.SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER)
+        self.start()
         last, last_status, last_send = None, 0.0, 0.0
         while self.running:
             now = time.monotonic()
             if now - last_status > 1:
                 last_status = now
-                st = helper("status")
+                parts = helper("status").split()
+                st = parts[0] if parts else "off"
                 self.state["link"] = st
                 self.state["client"] = client_ip() if st == "connected" else None
-                if self.fd is None and os.path.exists(HIDG):
+                if st != "connected":
+                    self.rumble = (0, 0)
+                if self.mode == "generic" and self.fd is None and os.path.exists(HIDG):
                     try:
                         self.fd = os.open(HIDG, os.O_WRONLY | os.O_NONBLOCK)
                     except OSError:
@@ -178,7 +238,10 @@ class Pad:
                     last = None
                 else:
                     self.state["pad"] = None
-            if self.gc and self.fd is not None:
+            if self.gc and self.xdev:
+                self.xdev.update(self.xinput_report())
+                self.apply_rumble(now)
+            elif self.gc and self.fd is not None:
                 rep = self.report()
                 if rep != last or now - last_send > 0.1:
                     try:
@@ -192,6 +255,8 @@ class Pad:
                                 pass
                             self.fd = None
             time.sleep(0.004)
+        if self.gc:
+            sdl.SDL_GameControllerRumble(self.gc, 0, 0, 0)
         if self.fd is not None:
             try:
                 os.write(self.fd, NEUTRAL)
@@ -204,8 +269,12 @@ class Pad:
 class DemoPad:
     """Fake backend for --demo: cycles through the three states."""
     def __init__(self):
-        self.state = {"link": "waiting", "client": None, "pad": "Steam Virtual Gamepad"}
+        self.state = {"link": "waiting", "client": None, "pad": "Steam Virtual Gamepad",
+                      "busid": "5-1", "mode": "xbox"}
         self.running = True
+
+    def stop(self):
+        pass
 
     def loop(self):
         seq = [("waiting", None), ("connected", "192.168.1.20"), ("off", None)]
@@ -275,6 +344,13 @@ def run_ui(pad, stop):
         for w in root.winfo_children():
             w.destroy()
 
+    def switch_mode():
+        """Toggle Xbox 360 / generic mode: save it and restart the app in place (same PID for Steam)."""
+        settings["mode"] = "generic" if pad.state.get("mode", "xbox") == "xbox" else "xbox"
+        save_settings(settings)
+        stop()
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
     # ---- first run: language picker
     def show_language_picker():
         clear()
@@ -301,6 +377,10 @@ def run_ui(pad, stop):
         tk.Button(top, text="A/文  " + t("lang_name"), font=("Sans", 15), command=show_language_picker,
                   fg=DIM, bg=BG, activebackground=CARD, activeforeground=FG, bd=0,
                   relief="flat", padx=16, pady=8, highlightthickness=0).pack(side="right", padx=20, pady=14)
+        mode_key = "mode_xbox" if pad.state.get("mode", "xbox") == "xbox" else "mode_generic"
+        tk.Button(top, text="⇄  " + t(mode_key), font=("Sans", 15), command=switch_mode,
+                  fg=DIM, bg=BG, activebackground=CARD, activeforeground=FG, bd=0,
+                  relief="flat", padx=16, pady=8, highlightthickness=0).pack(side="left", padx=20, pady=14)
         header(root, pady=(0, 4))
         card = tk.Frame(root, bg=CARD, padx=40, pady=22)
         card.pack(pady=(6, 0))
@@ -319,7 +399,8 @@ def run_ui(pad, stop):
                 msg = t("client", ip=s["client"]) if s["client"] else t("client_generic")
             elif s["link"] == "waiting":
                 status.config(text=t("waiting"), fg=CYAN)
-                msg = t("waiting_help", ip=own_ip())
+                device = "Xbox 360 Controller" if s.get("mode") == "xbox" else "DeckRemote"
+                msg = t("waiting_help", ip=own_ip(), bus=s.get("busid") or "…", device=device)
             else:
                 status.config(text=t("off"), fg="#f87171")
                 msg = t("off_help", err=s["link"])
@@ -354,8 +435,9 @@ def start_guard():
 
 
 def main():
-    pad = DemoPad() if DEMO else Pad()
-    up = "demo" if DEMO else helper("up")
+    mode = load_settings().get("mode", "xbox")
+    pad = DemoPad() if DEMO else Pad(mode)
+    up = "demo" if DEMO else mode
     if not DEMO:
         start_guard()
     stopped = threading.Event()
@@ -367,6 +449,7 @@ def main():
         pad.running = False
         time.sleep(0.05)
         if not DEMO:
+            pad.stop()
             helper("down")
 
     def on_signal(*_):

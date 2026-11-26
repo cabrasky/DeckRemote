@@ -13,11 +13,13 @@ El objetivo: alguien piensa *"quiero usar la Steam Deck como mando"* y en un par
 | Instalar usbip-win2 en el PC | Programa técnico, en inglés y que instala un driver |
 | Escribir la IP y elegir `usbip-vudc.0` | Nadie sabe qué es eso |
 | Hacer *Attach* cada vez | Un rollo en cada partida |
-| Mando HID genérico, no de Xbox | Muchos juegos de PC solo aceptan XInput |
 
 ## Propuestas, de más a menos impacto
 
-### 1. Emular un mando de Xbox 360, para que funcione en todos los juegos
+### ✅ 1. Emular un mando de Xbox 360, para que funcione en todos los juegos (hecho)
+
+Hecho: DeckRemote ya se presenta de serie como un mando de Xbox 360 con cable (XInput, con la vibración reenviada a la Deck). Mira [ARQUITECTURA.md](ARQUITECTURA.md). Debajo queda el plan original.
+
 El kernel de la Deck trae **FunctionFS** (`CONFIG_USB_CONFIGFS_F_FS=y`). Con él, el dispositivo virtual puede presentarse como **Xbox 360 Controller** (`045e:028e`) con sus descriptores propios. Windows lo reconoce con su driver de serie, como **XInput**, igual que un mando de Xbox con cable. Es la mayor mejora de compatibilidad: todos los juegos de PC, sin programas extra. Además, con XInput llega la **vibración** de vuelta, que podría mover la háptica de la Deck.
 
 ### 2. App compañera para Windows: adiós a IPs y a `usbip-vudc.0`
@@ -62,7 +64,7 @@ USB/IP no tiene autenticación. Para un público general:
 Unos 4 clics por equipo la primera vez, y 2 en cada partida. Sin terminal, sin IPs y sin contraseñas.
 
 ## Orden recomendado
-1. Emulación de Xbox 360 (la compatibilidad es lo primero que nota la gente).
+1. ~~Emulación de Xbox 360~~ (hecho).
 2. Descubrimiento por mDNS + app compañera de Windows.
 3. Plugin de Decky Loader.
 4. Código de emparejamiento.

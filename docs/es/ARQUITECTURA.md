@@ -2,39 +2,52 @@
 
 [🇬🇧 English version](../ARCHITECTURE.md)
 
+DeckRemote tiene dos modos. El **modo Xbox 360** (el de serie) se presenta como un mando de Xbox 360 con cable, así que Windows usa XInput y los juegos pueden mandar vibración. El **modo genérico** se presenta como un mando HID normal.
+
 ## Piezas
 
 | Pieza | Dónde | Quién la ejecuta | Qué hace |
 |---|---|---|---|
-| `deckremote.py` | `~/DeckRemote/` | `deck`, lanzado por Steam | Lee el mando, escribe los informes HID y muestra la pantalla de estado |
-| `gadget.sh` | `/etc/deckremote/` | `root` vía `sudo -n` | `up` crea el mando USB virtual y arranca `usbipd --device`. `down` lo quita todo. `status` devuelve `off` / `waiting` / `connected`. |
-| `report_desc.bin`, `report_len` | `~/DeckRemote/` | — | El descriptor HID del mando, generado por `make_descriptor.py` |
+| `deckremote.py` | `~/DeckRemote/` | `deck`, lanzado por Steam | Lee el mando, alimenta el mando virtual, reproduce la vibración y muestra la pantalla de estado |
+| `xinput.py` | `~/DeckRemote/` | `deck` | Mando de Xbox 360 con raw-gadget: descriptores USB, peticiones de control, informes de entrada y paquetes de vibración |
+| `gadget.sh` | `/etc/deckremote/` | `root` vía `sudo -n` | `up-xbox` / `bind` (modo Xbox), `up` (modo genérico), `down` (lo quita todo), `status` (`off` / `waiting` / `connected` + bus id) |
+| `report_desc.bin`, `report_len` | `~/DeckRemote/` | — | El descriptor HID del modo genérico, generado por `make_descriptor.py` |
 | `set_artwork.py` | `~/DeckRemote/` | `deck` | Busca el app id del acceso directo en `shortcuts.vdf` y copia el arte en `userdata/<usuario>/config/grid/` |
-| usbip-win2 | PC | usuario | Cliente USB/IP que conecta `usbip-vudc.0` |
+| usbip-win2 | PC | usuario | Cliente USB/IP |
 
-## Qué pasa al abrir la app
+## Modo Xbox 360
 
-1. Steam lanza `deckremote.sh`, que ejecuta `deckremote.py` con el entorno de juego de Steam: Steam Input está activo y `SDL_GAMECONTROLLER_IGNORE_DEVICES` oculta el mando físico.
-2. La app ejecuta `sudo -n gadget.sh up`, que:
-   - carga `libcomposite`, `usb_f_hid` y `usbip-vudc`;
-   - crea en configfs (`/sys/kernel/config/usb_gadget/deckremote`) un dispositivo USB `1d6b:0104` con una función HID de 13 bytes;
-   - lo enlaza al UDC virtual `usbip-vudc.0`;
-   - arranca `usbipd --device` como unidad temporal (`deckremote-usbipd`), que publica ese UDC en el puerto TCP 3240;
-   - da `/dev/hidg0` al usuario `deck`.
-3. Un hilo abre con SDL2 el **"Steam Virtual Gamepad"**, el mando que Steam da a los juegos. Cada 4 ms escribe en `/dev/hidg0` botones, cruceta, sticks y gatillos: en cada cambio, y como mínimo cada 100 ms. La escritura no bloquea, así que la interfaz no se congela aunque no haya ningún PC conectado.
-4. La interfaz (Tk a pantalla completa) consulta `gadget.sh status` cada segundo. Cuando hay un PC conectado muestra su IP, que saca con `ss` de las conexiones al puerto 3240.
-5. Al salir (con el botón, con el `SIGTERM` de Steam o cerrando la ventana), la app envía un informe neutro y ejecuta `gadget.sh down`.
-6. Si la app muere sin poder recoger (Steam se reinicia, `SIGKILL`), la pilla un pequeño **vigilante**: una unidad de usuario temporal `deckremote-guard-<pid>` que arranca con la app. Espera a que desaparezca el PID de la app, ejecuta `gadget.sh down` y se cierra. Nunca dura más de ~2 segundos después de la app.
+1. Steam lanza `deckremote.sh`, que ejecuta `deckremote.py` con el entorno de juego de Steam: Steam Input está activo y el mando físico queda oculto para SDL.
+2. La app ejecuta `sudo -n gadget.sh up-xbox`, que carga `usbip-host`, `dummy_hcd` y `raw_gadget`, apunta el puerto de dummy_hcd (por ejemplo `5-1`) en la lista de usbip-host y da `/dev/raw-gadget` al usuario `deck`.
+3. `xinput.py` abre `/dev/raw-gadget`, se engancha a `dummy_udc.0` y empieza a contestar peticiones USB como un mando de Xbox 360 con cable (`045e:028e`, interfaz de fabricante `FF/5D/01` con su descriptor `0x21` de 17 bytes y dos endpoints de interrupción). Los descriptores siguen a GP2040-CE (MIT).
+4. La propia Deck enumera el dispositivo nuevo primero. Su `SET_CONFIGURATION` se rechaza, así que el mando nunca se configura en local: ni `xpad`, ni mando fantasma en Steam.
+5. La app ejecuta `gadget.sh bind`: `usbip bind` pasa el dispositivo a usbip-host y `usbipd` (modo host) lo publica en el puerto TCP 3240.
+6. El PC lo conecta. Windows lo configura, carga su driver de serie *Xbox 360 Controller for Windows*, pide las capacidades XInput (las contesta `xinput.py`) y enciende el LED de jugador.
+7. Un hilo lee el **"Steam Virtual Gamepad"** con SDL2 cada 4 ms. Monta el informe XInput de 20 bytes (botones, gatillos y sticks con el eje Y invertido) y lo envía por el endpoint IN en cada cambio, más uno de mantenimiento cada 0,5 s.
+8. Los paquetes de vibración (`00 08 00 fuerte suave …`) llegan por el endpoint OUT. La app los reproduce en la Deck con `SDL_GameControllerRumble` y los rearma cada 0,5 s mientras no sean cero, porque XInput mantiene un nivel hasta que cambia y la vibración de SDL caduca. La vibración se pone a cero cuando el PC se desconecta y al salir de la app.
 
-## Informe HID (13 bytes, sin report ID)
+### Informe XInput (20 bytes)
 
-| Bytes | Campo | Rango |
-|---|---|---|
-| 0–1 | 16 botones (bit 0 = A …) | 0/1 |
-| 2 | Hat en el nibble bajo (0–7, 8 = centro) | — |
-| 3–4, 5–6 | Stick izquierdo X, Y | −32767..32767 |
-| 7–8, 9–10 | Stick derecho Rx, Ry | −32767..32767 |
-| 11, 12 | Gatillos Z, Rz | 0..255 |
+| Byte | Contenido |
+|---|---|
+| 0, 1 | `00 14` (tipo, longitud) |
+| 2 | Cruceta arriba/abajo/izquierda/derecha, Start, Back, LS, RS |
+| 3 | LB, RB, Guide, –, A, B, X, Y |
+| 4, 5 | Gatillo izquierdo / derecho (0..255) |
+| 6–13 | LX, LY, RX, RY (int16, Y hacia arriba = positivo) |
+| 14–19 | 0 |
+
+## Modo genérico
+
+1. `gadget.sh up` carga `libcomposite`, `usb_f_hid` y `usbip-vudc`, crea en configfs un gadget `1d6b:0104` con una función HID de 13 bytes, lo enlaza a `usbip-vudc.0`, arranca `usbipd --device` y da `/dev/hidg0` a `deck`.
+2. La app escribe en `/dev/hidg0` informes HID de 13 bytes (16 botones, hat, 4 ejes y 2 gatillos), sin bloquear, en cada cambio y como mínimo cada 100 ms.
+
+## Común a los dos modos
+
+- La interfaz (Tk a pantalla completa) consulta `gadget.sh status` cada segundo y muestra la IP del PC, que saca con `ss` de las conexiones al puerto 3240.
+- Al salir (con el botón, con el `SIGTERM` de Steam o cerrando la ventana), la app para la vibración, envía un informe neutro y ejecuta `gadget.sh down`.
+- Si la app muere sin poder recoger (Steam se reinicia, `SIGKILL`), la pilla un pequeño **vigilante**: una unidad de usuario temporal `deckremote-guard-<pid>` que arranca con la app, espera a que desaparezca su PID, ejecuta `gadget.sh down` y se cierra. Nunca dura más de ~2 segundos después de la app.
+- El botón **⇄** guarda el otro modo y reinicia la app en el sitio (`execv`, mismo PID para Steam).
 
 ## Decisiones de diseño
 
@@ -50,8 +63,11 @@ Por eso DeckRemote **crea un mando virtual nuevo**, y la Deck conserva el suyo.
 - Así respeta tu configuración de Steam Input, y los botones Steam / ⋯ siguen siendo de Steam.
 - La app desactiva HIDAPI en SDL (`SDL_JOYSTICK_HIDAPI=0`) y elige el mando **por nombre**, porque Steam lo anuncia con el mismo VID:PID que el mando físico. Abrir el mando físico directamente puede dejarlo en un estado que Steam no recupera.
 
-### ¿Por qué `usbip-vudc` y no `dummy_hcd`?
-Con `usbip-vudc` el dispositivo virtual nunca aparece como USB local en la Deck, así que ningún driver de la Deck lo coge, y `usbipd --device` lo publica directamente.
+### ¿Por qué raw-gadget sobre dummy_hcd en el modo Xbox?
+- El driver XInput de Windows necesita el descriptor de fabricante de 17 bytes de tipo `0x21`. **FunctionFS** valida el tipo `0x21` como un descriptor HID de 9 bytes y lo rechaza. Sin él, Windows carga el driver pero XInput dice que el mando *no está conectado*.
+- **raw-gadget** deja que la app conteste ella misma a cada petición. Pero `usbip-vudc` pide el descriptor del dispositivo de forma síncrona, y una respuesta desde el espacio de usuario no llega a tiempo.
+- Así que el mando vive en **dummy_hcd** (un puerto USB virtual local) y se publica con **usbip-host**, el mismo camino que USB/IP usa para dispositivos reales.
+- Probado en SteamOS 3.9: desmontar un gadget a medio configurar (vudc con FunctionFS o con raw-gadget) y descargar esos módulos **colgó el kernel**. Por eso el ayudante nunca descarga `raw_gadget` ni `dummy_hcd`. Se quedan cargados sin hacer nada, y nada escucha en la red.
 
 ### ¿Por qué el archivo de sudo se llama `zz-deckremote`?
 `sudo` lee `/etc/sudoers.d/` en orden alfabético y aplica la **última** regla que coincide. SteamOS trae `wheel`, que pide contraseña. Un nombre que vaya detrás garantiza que gane la regla `NOPASSWD`.

@@ -13,11 +13,13 @@ The goal: someone thinks *"I want to use my Steam Deck as a controller"*, and a 
 | Installing usbip-win2 on the PC            | A technical tool, in English, that installs a driver |
 | Typing the IP and choosing `usbip-vudc.0`  | Nobody knows what that means                         |
 | *Attach* every session                   | Friction every single time                           |
-| Generic HID, not Xbox                      | Many PC games only accept XInput controllers         |
 
 ## Proposals, highest impact first
 
-### 1. Xbox 360 controller emulation, so it works in every game
+### ✅ 1. Xbox 360 controller emulation, so it works in every game (done)
+
+Done: DeckRemote now presents a wired Xbox 360 controller by default (XInput, with rumble forwarded to the Deck). See [ARCHITECTURE.md](ARCHITECTURE.md). The original plan follows.
+
 
 The Deck's kernel has **FunctionFS** (`CONFIG_USB_CONFIGFS_F_FS=y`). With it, the virtual device can present itself as an **Xbox 360 Controller** (`045e:028e`) with its vendor-specific descriptors. Windows recognises it with its built-in driver as **XInput**, exactly like a wired Xbox pad. That's the biggest compatibility win: every PC game, with no extra software. As a bonus, XInput sends **rumble** back, which could drive the Deck's haptics.
 
@@ -72,7 +74,7 @@ That's about 4 clicks per device the first time, and 2 clicks per session after 
 
 ## Suggested order
 
-1. Xbox 360 emulation (compatibility is what users notice first).
+1. ~~Xbox 360 emulation~~ (done).
 2. mDNS discovery + Windows companion app.
 3. Decky Loader plugin.
 4. Pairing code.

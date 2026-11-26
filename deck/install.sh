@@ -19,6 +19,7 @@ say "Copying DeckRemote to $APP"
 mkdir -p "$APP/art"
 install -m 755 "$SRC/deckremote.py" "$APP/deckremote.py"
 install -m 644 "$SRC/set_artwork.py" "$APP/set_artwork.py"
+install -m 644 "$SRC/xinput.py" "$APP/xinput.py"
 cp "$SRC"/art/*.png "$APP/art/"
 python3 "$SRC/make_descriptor.py" "$APP" >/dev/null
 printf '#!/bin/bash\nexec /usr/bin/python3 %s/deckremote.py "$@"\n' "$APP" > "$APP/deckremote.sh"
@@ -41,7 +42,7 @@ set -e
 mkdir -p /etc/deckremote
 install -m 755 -o root -g root "$1" /etc/deckremote/gadget.sh
 tmp=$(mktemp)
-echo 'deck ALL=(root) NOPASSWD: /etc/deckremote/gadget.sh up, /etc/deckremote/gadget.sh down, /etc/deckremote/gadget.sh status' > "$tmp"
+echo 'deck ALL=(root) NOPASSWD: /etc/deckremote/gadget.sh up, /etc/deckremote/gadget.sh up-xbox, /etc/deckremote/gadget.sh bind, /etc/deckremote/gadget.sh down, /etc/deckremote/gadget.sh status' > "$tmp"
 visudo -cf "$tmp" >/dev/null
 # "zz-" so it is read after SteamOS's own "wheel" rule (sudo applies the last matching rule)
 install -m 440 -o root -g root "$tmp" /etc/sudoers.d/zz-deckremote
