@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+deck/report_desc.bin
+deck/report_len
