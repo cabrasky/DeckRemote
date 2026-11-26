@@ -11,6 +11,8 @@ Abres **DeckRemote** en la Steam Deck y tu PC con Windows detecta un **mando de 
 - **Vibración.** Cuando un juego hace vibrar el mando, vibra la Deck (los dos motores, a través de la háptica de Steam).
 - **También modo genérico.** Un interruptor de *Modo genérico* lo convierte en un mando HID normal (DirectInput), por si algún caso raro lo necesita.
 - **La Deck sigue siendo tuya.** El botón Steam, el ⋯ y la pantalla táctil siguen funcionando en la Deck mientras juegas en el PC.
+- **Tu mando, en directo.** El mando holográfico de la Deck ilumina los botones que pulsas, sigue los sticks y muestra la vibración de los dos motores.
+- **12 idiomas.** English, Español, Français, Deutsch, Italiano, Português (BR), Polski, Русский, Türkçe, 日本語, 한국어 y 简体中文; la primera vez propone el idioma que tengas en Steam.
 - **Usa tu configuración de Steam Input.** DeckRemote lee el mando que Steam da a los juegos, así que puedes asignar las palancas traseras, el giroscopio o los trackpads desde los ajustes del mando del acceso directo.
 - **Nada funcionando de fondo.** No hay servicios al arrancar, y en el PC solo está el cliente USB/IP estándar. Todo se enciende al abrir la app y se apaga al cerrarla.
 
@@ -85,7 +87,7 @@ También puedes usar el instalador de [su página de releases](https://github.co
 
 ## Cómo se usa
 
-1. **Deck:** abre **DeckRemote**. La primera vez te pregunta el idioma (English / Español). Puedes cambiarlo cuando quieras con el botón de arriba a la derecha. La pantalla pone *Esperando al PC…* y muestra la IP de la Deck y el **bus id** que hay que conectar (por ejemplo `5-1`).
+1. **Deck:** abre **DeckRemote**. La primera vez te pregunta el idioma (aparece resaltado el que tengas en Steam). Puedes cambiarlo cuando quieras con el botón **A/文** de abajo. La pantalla pone *Esperando al PC…* y muestra la IP de la Deck y el **bus id** que hay que conectar (por ejemplo `5-1`).
 
    <p align="center"><img src="docs/img/deck-language.png" width="60%" alt="Selector de idioma"></p>
 2. **PC:** abre **USBip** desde el menú Inicio. Escribe la IP de la Deck en *Server* y pulsa *Add devices*. Elige el dispositivo que indica la Deck (*Microsoft Corp. : Xbox360 Controller*, con un bus id tipo `5-1`) y pulsa *Attach*. Desde una terminal:
@@ -103,7 +105,7 @@ Para comprobarlo en Windows, mira en *Configuración → Bluetooth y dispositivo
 
 **Truco:** usbip-win2 sigue reintentando la conexión hasta que la desconectas. Si solo cierras DeckRemote en la Deck y no tocas USBip, lo normal es que el PC se reconecte solo la próxima vez que abras DeckRemote.
 
-**Modo genérico:** el botón **⇄** de arriba a la izquierda cambia entre *Modo Xbox 360* (el de serie) y *Modo genérico* (un mando HID normal, que se conecta como `usbip-vudc.0`). La app recuerda lo que elijas.
+**Modo genérico:** el botón **⇄** de abajo cambia entre *Modo Xbox 360* (el de serie) y *Modo genérico* (un mando HID normal, que se conecta como `usbip-vudc.0`). La app recuerda lo que elijas.
 
 ### Qué botón es cada uno (modo Xbox 360)
 
@@ -157,7 +159,9 @@ En el **PC**, ve a *Configuración → Aplicaciones → USBip → Desinstalar*.
 
 ```
 deck/
-  deckremote.py       la app (Python 3 + Tk + SDL2 vía ctypes), interfaz en inglés y español
+  deckremote.py       la app (Python 3 + Tk + SDL2 vía ctypes)
+  i18n.py             textos de la interfaz en 12 idiomas (añade el tuyo aquí)
+  ui/                 imágenes de la interfaz ya renderizadas + layout.json (generado)
   xinput.py           mando de Xbox 360 con raw-gadget: descriptores, informes y vibración
   gadget.sh           ayudante root: crea y quita el mando USB virtual y usbipd
   make_descriptor.py  genera el descriptor HID
@@ -167,6 +171,8 @@ deck/
   art/                arte de la biblioteca (portada, banner, fondo, logo, icono)
 tools/
   make_art.py         regenera deck/art (Pillow)
+  make_ui.py          regenera deck/ui, la interfaz de la app (Pillow)
+  shape_compare.py    compara las siluetas dibujadas con fotos de referencia
 docs/
   ARCHITECTURE.md / ROADMAP.md   documentación en inglés
   es/                            documentación en español
@@ -175,6 +181,7 @@ docs/
 
 ### Desarrollo
 
-- Ver la interfaz sin Deck: `python deck/deckremote.py --demo --windowed`. Recorre los estados con datos de ejemplo y no toca USB ni mandos.
+- Ver la interfaz sin Deck (Windows o Linux): `python deck/deckremote.py --demo --windowed`. Recorre los estados, simula pulsaciones y vibración, y no toca USB ni mandos. Con `--snap captura.png` guarda una captura y se cierra.
 - En la Deck, sin interfaz y con el estado por terminal: `python3 ~/DeckRemote/deckremote.py --headless`.
-- Regenerar el arte: `python tools/make_art.py` (necesita Pillow).
+- Regenerar el arte: `python tools/make_art.py`, y después las imágenes de la interfaz: `python tools/make_ui.py` (los dos necesitan Pillow).
+- Las traducciones están en `deck/i18n.py`: copia el bloque `en`, tradúcelo y añade el nombre del idioma en Steam a `STEAM_LANGUAGES`.

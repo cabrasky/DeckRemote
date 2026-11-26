@@ -49,6 +49,14 @@ DeckRemote has two modes. **Xbox 360 mode** (default) presents a wired Xbox 360 
 - If the app is killed without a chance to clean up (Steam restarting, `SIGKILL`), a tiny **guard** catches it: a transient user unit `deckremote-guard-<pid>`, started with the app, that waits for the app's PID to disappear, runs `gadget.sh down` and exits. It never outlives the app by more than ~2 seconds.
 - The **⇄** button saves the other mode and restarts the app in place (`execv`, same PID for Steam).
 
+## User interface
+
+- The screen follows the *Hologram* design: the Deck projects a holographic pad that lights up the buttons you press, follows both sticks and dims while no PC is attached. A glass card shows the link state, IPs, bus id, mode and the rumble on both motors.
+- The Deck has no Pillow and Tk draws shapes without anti-aliasing, so `tools/make_ui.py` pre-renders every visual piece at 3× into `deck/ui/` (background, hologram on/dim, one glow sprite per button, stick dot, card, pills, tiles, status dots, wordmarks) and writes the positions the app needs to `deck/ui/layout.json`. The app only places those PNGs on a Tk canvas and draws the text with Noto Sans (which includes CJK).
+- The input view refreshes at ~30 fps and only touches canvas items that changed.
+- Strings live in `deck/i18n.py` (12 languages). On first launch the picker highlights the language set in Steam (`registry.vdf`).
+- Everything is touch-driven, because the Deck's buttons are being sent to the PC.
+
 ## Design decisions
 
 ### Why not pass through the Deck's real controller?

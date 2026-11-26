@@ -20,6 +20,8 @@ mkdir -p "$APP/art"
 install -m 755 "$SRC/deckremote.py" "$APP/deckremote.py"
 install -m 644 "$SRC/set_artwork.py" "$APP/set_artwork.py"
 install -m 644 "$SRC/xinput.py" "$APP/xinput.py"
+install -m 644 "$SRC/i18n.py" "$APP/i18n.py"
+rm -rf "$APP/ui"; cp -r "$SRC/ui" "$APP/ui"
 cp "$SRC"/art/*.png "$APP/art/"
 python3 "$SRC/make_descriptor.py" "$APP" >/dev/null
 printf '#!/bin/bash\nexec /usr/bin/python3 %s/deckremote.py "$@"\n' "$APP" > "$APP/deckremote.sh"

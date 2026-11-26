@@ -49,6 +49,14 @@ DeckRemote tiene dos modos. El **modo Xbox 360** (el de serie) se presenta como 
 - Si la app muere sin poder recoger (Steam se reinicia, `SIGKILL`), la pilla un pequeño **vigilante**: una unidad de usuario temporal `deckremote-guard-<pid>` que arranca con la app, espera a que desaparezca su PID, ejecuta `gadget.sh down` y se cierra. Nunca dura más de ~2 segundos después de la app.
 - El botón **⇄** guarda el otro modo y reinicia la app en el sitio (`execv`, mismo PID para Steam).
 
+## Interfaz
+
+- La pantalla sigue el diseño *Holograma*: la Deck proyecta un mando holográfico que ilumina los botones que pulsas, sigue los dos sticks y se atenúa mientras no hay ningún PC conectado. Una tarjeta de cristal muestra el estado, las IPs, el bus id, el modo y la vibración de los dos motores.
+- En la Deck no hay Pillow y Tk dibuja las formas sin suavizado, así que `tools/make_ui.py` renderiza de antemano, a 3×, cada pieza visual en `deck/ui/` (fondo, holograma encendido y atenuado, un brillo por botón, el punto del stick, la tarjeta, los botones, las fichas de idioma, los puntos de estado y los logotipos) y guarda en `deck/ui/layout.json` las posiciones que necesita la app. La app solo coloca esos PNG en un lienzo de Tk y escribe el texto con Noto Sans (que incluye CJK).
+- El visor de entrada se refresca a ~30 fps y solo toca los elementos que han cambiado.
+- Los textos están en `deck/i18n.py` (12 idiomas). La primera vez, el selector resalta el idioma que tengas en Steam (`registry.vdf`).
+- Todo se maneja con la pantalla táctil, porque los botones de la Deck se están enviando al PC.
+
 ## Decisiones de diseño
 
 ### ¿Por qué no enviar el mando físico de la Deck?

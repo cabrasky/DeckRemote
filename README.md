@@ -11,6 +11,8 @@ Open **DeckRemote** on your Steam Deck and your Windows PC sees a **wired Xbox 3
 - **Rumble.** When a game makes the controller vibrate, the Deck vibrates (both motors, through Steam's haptics).
 - **Generic mode too.** A *Generic mode* switch turns it into a plain HID gamepad (DirectInput), for the odd case that needs one.
 - **Your Deck stays yours.** The Steam button, the ⋯ button and the touchscreen keep working on the Deck while you play on the PC.
+- **A live view of your controller.** The holographic pad on the Deck lights up the buttons you press, follows the sticks and shows the rumble on both motors.
+- **12 languages.** English, Español, Français, Deutsch, Italiano, Português (BR), Polski, Русский, Türkçe, 日本語, 한국어 and 简体中文, picked from your Steam language on first launch.
 - **Uses your Steam Input layout.** DeckRemote reads the controller Steam gives to games, so back grips, gyro and trackpads can be mapped from the shortcut's controller settings.
 - **Nothing runs in the background.** No services at boot, nothing on the PC but a standard USB/IP client. Everything starts when you open the app and stops when you close it.
 
@@ -85,7 +87,7 @@ You can also use the installer from [its releases page](https://github.com/vadim
 
 ## Use
 
-1. **Deck:** open **DeckRemote**. On first launch, choose your language (English / Español). You can change it any time with the button at the top right. The screen shows *Waiting for PC…*, the Deck's IP address and the **bus id** to attach (for example `5-1`).
+1. **Deck:** open **DeckRemote**. On first launch, choose your language (your Steam language is highlighted). You can change it any time with the **A/文** button at the bottom. The screen shows *Waiting for PC…*, the Deck's IP address and the **bus id** to attach (for example `5-1`).
 
    <p align="center"><img src="docs/img/deck-language.png" width="60%" alt="Language picker"></p>
 2. **PC:** open **USBip** from the Start menu. Type the Deck's IP under *Server* and click *Add devices*. Select the device the Deck shows (*Microsoft Corp. : Xbox360 Controller*, bus id like `5-1`) and click *Attach*. From a terminal:
@@ -103,7 +105,7 @@ To check it on Windows, open *Settings → Bluetooth & devices → Devices*, run
 
 **Tip:** usbip-win2 keeps retrying an attach until you detach it. If you just close DeckRemote on the Deck and leave USBip alone, the PC usually reconnects by itself the next time you open DeckRemote.
 
-**Generic mode:** the **⇄** button at the top left switches between *Xbox 360 mode* (default) and *Generic mode* (a plain HID gamepad, attached as `usbip-vudc.0`). The app remembers your choice.
+**Generic mode:** the **⇄** button at the bottom switches between *Xbox 360 mode* (default) and *Generic mode* (a plain HID gamepad, attached as `usbip-vudc.0`). The app remembers your choice.
 
 ### Button mapping (Xbox 360 mode)
 
@@ -157,7 +159,9 @@ On the **PC**, go to *Settings → Apps → USBip → Uninstall*.
 
 ```
 deck/
-  deckremote.py       the app (Python 3 + Tk + SDL2 via ctypes), English/Spanish UI
+  deckremote.py       the app (Python 3 + Tk + SDL2 via ctypes)
+  i18n.py             UI strings in 12 languages (add yours here)
+  ui/                 pre-rendered UI images + layout.json (generated)
   xinput.py           Xbox 360 controller over raw-gadget: descriptors, reports, rumble
   gadget.sh           root helper: creates/removes the virtual USB gamepad and usbipd
   make_descriptor.py  writes the HID report descriptor
@@ -167,6 +171,8 @@ deck/
   art/                Steam library artwork (capsule, header, hero, logo, icon)
 tools/
   make_art.py         regenerates deck/art (Pillow)
+  make_ui.py          regenerates deck/ui, the in-app interface (Pillow)
+  shape_compare.py    compares the drawn silhouettes with reference pictures
 docs/
   ARCHITECTURE.md     internals and design decisions
   ROADMAP.md          ideas to make DeckRemote a "4-click" install
@@ -176,6 +182,7 @@ docs/
 
 ### Development
 
-- Preview the UI without a Deck: `python deck/deckremote.py --demo --windowed`. It cycles through the states with fake data and doesn't touch USB or controllers.
+- Preview the UI without a Deck (Windows or Linux): `python deck/deckremote.py --demo --windowed`. It cycles through the states, fakes button presses and rumble, and doesn't touch USB or controllers. Add `--snap shot.png` to save a screenshot and quit.
 - Headless run on the Deck, with status printed to the terminal: `python3 ~/DeckRemote/deckremote.py --headless`.
-- Regenerate the artwork: `python tools/make_art.py` (needs Pillow).
+- Regenerate the artwork: `python tools/make_art.py`, then the UI images: `python tools/make_ui.py` (both need Pillow).
+- Translations live in `deck/i18n.py`: copy the `en` block, translate it and add the Steam language name to `STEAM_LANGUAGES`.

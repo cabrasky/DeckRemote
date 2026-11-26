@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""DeckRemote: use your Steam Deck as a standard USB gamepad for your PC, over the network.
+"""DeckRemote: use your Steam Deck as a PC controller over the network.
 
-Reads the controller Steam gives this app (SDL2, "Steam Virtual Gamepad") and writes HID
-reports to the virtual USB gadget /dev/hidg0, which /etc/deckremote/gadget.sh creates and
-exports with USB/IP (usbipd --device). The PC attaches it with any USB/IP client.
+Reads the controller Steam gives this app (SDL2, "Steam Virtual Gamepad") and feeds a virtual
+USB gamepad exported with USB/IP: an Xbox 360 controller (xinput.py, XInput + rumble) or a
+generic HID gamepad (/dev/hidg0). The PC attaches it with any USB/IP client.
 """
 import ctypes, ctypes.util, errno, json, os, signal, socket, struct, subprocess, sys, threading, time
 
@@ -12,44 +12,10 @@ HIDG = "/dev/hidg0"
 SETTINGS = os.path.expanduser("~/.config/deckremote/settings.json")
 HEADLESS = "--headless" in sys.argv
 DEMO = "--demo" in sys.argv  # UI only, fake states (for screenshots / development)
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 
-# ---------------------------------------------------------------- translations
-STRINGS = {
-    "en": {
-        "lang_name": "English",
-        "choose_lang": "Choose your language",
-        "connected": "● Connected to PC",
-        "client": "PC: {ip}",
-        "client_generic": "PC connected",
-        "waiting": "● Waiting for PC…",
-        "waiting_help": "On your PC, open USBip and attach\n{ip}  →  {bus}  ({device})",
-        "mode_xbox": "Xbox 360 mode",
-        "mode_generic": "Generic mode",
-        "off": "● Not sharing",
-        "off_help": "Couldn't start the virtual controller ({err}).",
-        "pad": "Controller: {name}",
-        "pad_none": "not detected — launch DeckRemote from Steam",
-        "deck_buttons": "The Steam and ⋯ buttons stay on your Deck.",
-        "quit": "Disconnect & exit",
-    },
-    "es": {
-        "lang_name": "Español",
-        "choose_lang": "Elige tu idioma",
-        "connected": "● Conectado al PC",
-        "client": "PC: {ip}",
-        "client_generic": "PC conectado",
-        "waiting": "● Esperando al PC…",
-        "waiting_help": "En el PC, abre USBip y conecta\n{ip}  →  {bus}  ({device})",
-        "mode_xbox": "Modo Xbox 360",
-        "mode_generic": "Modo genérico",
-        "off": "● Sin compartir",
-        "off_help": "No se pudo activar el mando virtual ({err}).",
-        "pad": "Mando: {name}",
-        "pad_none": "no detectado — abre DeckRemote desde Steam",
-        "deck_buttons": "Los botones Steam y ⋯ siguen siendo de tu Deck.",
-        "quit": "Desconectar y salir",
-    },
-}
+import i18n  # noqa: E402  (UI strings, 12 languages)
 
 
 def load_settings():
@@ -134,7 +100,8 @@ class Pad:
     """
     def __init__(self, mode="xbox"):
         self.mode = mode
-        self.state = {"link": "off", "client": None, "pad": None, "busid": None, "mode": mode}
+        self.state = {"link": "off", "client": None, "pad": None, "busid": None, "mode": mode,
+                      "buttons": set(), "axes": (0, 0, 0, 0, 0, 0), "rumble": (0, 0)}
         self.running = True
         self.gc = None
         self.fd = None
@@ -144,6 +111,7 @@ class Pad:
 
     def set_rumble(self, strong, weak):
         self.rumble = (strong, weak)
+        self.state["rumble"] = (strong, weak)
 
     def start(self):
         if self.mode == "xbox":
@@ -220,7 +188,7 @@ class Pad:
                 self.state["link"] = st
                 self.state["client"] = client_ip() if st == "connected" else None
                 if st != "connected":
-                    self.rumble = (0, 0)
+                    self.set_rumble(0, 0)
                 if self.mode == "generic" and self.fd is None and os.path.exists(HIDG):
                     try:
                         self.fd = os.open(HIDG, os.O_WRONLY | os.O_NONBLOCK)
@@ -238,6 +206,9 @@ class Pad:
                     last = None
                 else:
                     self.state["pad"] = None
+            if self.gc:
+                self.state["buttons"] = {i for i in range(15) if sdl.SDL_GameControllerGetButton(self.gc, i)}
+                self.state["axes"] = tuple(sdl.SDL_GameControllerGetAxis(self.gc, a) for a in range(6))
             if self.gc and self.xdev:
                 self.xdev.update(self.xinput_report())
                 self.apply_rumble(now)
@@ -267,154 +238,241 @@ class Pad:
 
 
 class DemoPad:
-    """Fake backend for --demo: cycles through the three states."""
+    """Fake backend for --demo: cycles the link states and animates input and rumble."""
     def __init__(self):
-        self.state = {"link": "waiting", "client": None, "pad": "Steam Virtual Gamepad",
-                      "busid": "5-1", "mode": "xbox"}
+        self.state = {"link": "waiting", "client": None, "pad": "Steam Virtual Gamepad", "busid": "5-1",
+                      "mode": load_settings().get("mode", "xbox"), "buttons": set(),
+                      "axes": (0, 0, 0, 0, 0, 0), "rumble": (0, 0)}
         self.running = True
 
     def stop(self):
         pass
 
     def loop(self):
+        import math
+        step = float(os.environ.get("DECKREMOTE_DEMO_STEP", "5"))
         seq = [("waiting", None), ("connected", "192.168.1.20"), ("off", None)]
-        i = 0
+        t0 = time.monotonic()
         while self.running:
-            self.state["link"], self.state["client"] = seq[i % len(seq)]
-            i += 1
-            time.sleep(float(os.environ.get("DECKREMOTE_DEMO_STEP", "4")))
+            t = time.monotonic() - t0
+            self.state["link"], self.state["client"] = seq[int(t // step) % len(seq)]
+            k = int(t * 2)
+            self.state["buttons"] = {[0, 1, 2, 3, 9, 10, 11, 14, 4, 6][k % 10]}
+            a = t * 2.2
+            self.state["axes"] = (int(math.cos(a) * 30000), int(math.sin(a) * 30000),
+                                  int(math.sin(a * 0.7) * 20000), 0, 0, int((math.sin(a) + 1) * 16000))
+            self.state["rumble"] = (int((math.sin(t * 1.3) + 1) * 110), int((math.cos(t * 0.9) + 1) * 60))
+            time.sleep(0.03)
 
 
-# ---------------------------------------------------------------- UI
+# ---------------------------------------------------------------- UI (design "Hologram")
 def run_ui(pad, stop):
     import tkinter as tk
-    settings = load_settings()
-    lang = {"code": settings.get("lang")}
-    if lang["code"] not in STRINGS and "--lang" in sys.argv:
-        lang["code"] = sys.argv[sys.argv.index("--lang") + 1]
+    import tkinter.font as tkfont
+    if sys.platform == "win32":  # UI preview on Windows: real pixels, no DPI scaling
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except (AttributeError, OSError):
+            pass
 
-    BG, FG, DIM = "#0b0918", "#ffffff", "#b0a8d6"
-    CYAN, MAGENTA, CARD = "#31e8ff", "#ff4fd8", "#17132b"
-    here = os.path.dirname(os.path.abspath(__file__))
+    UI = os.path.join(HERE, "ui")
+    with open(os.path.join(UI, "layout.json")) as f:
+        L = json.load(f)
+    settings = load_settings()
+    state = {"lang": settings.get("lang") if settings.get("lang") in i18n.LANGUAGES else None}
+    detected = i18n.steam_language() or "en"
+
+    TXT, DIM, INK = "#f6f8fc", "#b0a8d6", "#0b0918"
+    COLORS = {"connected": "#4ade80", "waiting": "#31e8ff", "off": "#f87171"}
+    DOTS = {"connected": "dot_green.png", "waiting": "dot_cyan.png", "off": "dot_red.png"}
+
     root = tk.Tk()
     root.title("DeckRemote")
-    root.configure(bg=BG)
+    root.configure(bg=INK)
     if "--windowed" in sys.argv:
         root.geometry("1280x800")
+        root.resizable(False, False)
     else:
         root.attributes("-fullscreen", True)
+    canvas = tk.Canvas(root, width=1280, height=800, bg=INK, highlightthickness=0, bd=0)
+    canvas.pack(fill="both", expand=True)
+
+    installed = set(tkfont.families())
+    family = next((f for f in ("Noto Sans", "Segoe UI", "DejaVu Sans") if f in installed), "Sans")
+    fonts = {}
+
+    def font(size, bold=False):
+        key = (size, bold)
+        if key not in fonts:
+            fonts[key] = tkfont.Font(root, family=family, size=-size, weight="bold" if bold else "normal")
+        return fonts[key]
 
     images = {}
 
-    def image(name, sub=1):
-        key = (name, sub)
-        if key not in images:
-            try:
-                img = tk.PhotoImage(file=os.path.join(here, "art", name))
-                images[key] = img.subsample(sub) if sub > 1 else img
-            except tk.TclError:
-                images[key] = None
-        return images[key]
-
-    def header(parent, pady=(36, 8)):
-        logo = image("logo.png", 2)
-        if logo:
-            tk.Label(parent, image=logo, bg=BG, bd=0).pack(pady=pady)
-        else:
-            tk.Label(parent, text="DeckRemote", font=("Sans", 40, "bold"), fg=FG, bg=BG).pack(pady=pady)
-
-    def pill_button(parent, text, command, color, font_size=24, width=None):
-        frame = tk.Frame(parent, bg=color, padx=3, pady=3)
-        b = tk.Button(frame, text=text, font=("Sans", font_size, "bold"), command=command, width=width,
-                      fg=FG, bg=CARD, activebackground=color, activeforeground=BG,
-                      relief="flat", bd=0, padx=36, pady=18, highlightthickness=0)
-        b.pack()
-        return frame
+    def img(name):
+        if name not in images:
+            images[name] = tk.PhotoImage(file=os.path.join(UI, name))
+        return images[name]
 
     def t(key, **kw):
-        return STRINGS[lang["code"] or "en"][key].format(**kw)
+        return i18n.text(state["lang"] or detected, key, **kw)
+
+    def button(x, y, label, kind, command, size=17, anchor="nw"):
+        """Pill button from pre-rendered images; kind 'v' (outline violet) or 'm' (filled magenta)."""
+        f = font(size, bold=True)
+        need = f.measure(label) + 40
+        widths = L["pill_widths"]
+        w = next((w for w in widths if w >= need), widths[-1])
+        h = 48 if kind == "v" else 56
+        if anchor == "ne":
+            x -= w
+        tag = f"btn{len(images)}_{x}_{y}"
+        canvas.create_image(x - 6, y - 6, image=img(f"pill_{kind}_{w}.png"), anchor="nw", tags=(tag, "screen"))
+        canvas.create_text(x + w / 2, y + h / 2, text=label, font=f, fill=TXT if kind == "v" else INK,
+                           tags=(tag, "screen"))
+        canvas.tag_bind(tag, "<ButtonRelease-1>", lambda e: command())
+        return w
 
     def quit_app():
         stop()
         root.destroy()
 
-    root.protocol("WM_DELETE_WINDOW", quit_app)
-
-    def clear():
-        for w in root.winfo_children():
-            w.destroy()
-
     def switch_mode():
-        """Toggle Xbox 360 / generic mode: save it and restart the app in place (same PID for Steam)."""
         settings["mode"] = "generic" if pad.state.get("mode", "xbox") == "xbox" else "xbox"
         save_settings(settings)
         stop()
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
-    # ---- first run: language picker
-    def show_language_picker():
-        clear()
-        header(root, pady=(70, 10))
-        tk.Label(root, text="Choose your language  ·  Elige tu idioma", font=("Sans", 21),
-                 fg=DIM, bg=BG).pack(pady=(10, 56))
-        row = tk.Frame(root, bg=BG)
-        row.pack()
-        for code, color in zip(STRINGS, (CYAN, MAGENTA)):
-            pill_button(row, STRINGS[code]["lang_name"], lambda c=code: choose(c), color,
-                        font_size=28, width=9).pack(side="left", padx=28)
+    root.protocol("WM_DELETE_WINDOW", quit_app)
+
+    # ---- language picker
+    def show_languages():
+        canvas.delete("all")
+        canvas.create_image(0, 0, image=img("bg_plain.png"), anchor="nw")
+        canvas.create_image(640, 92, image=img("wordmark_big.png"), anchor="center")
+        canvas.create_text(640, 165, text=t("choose_lang"), font=font(24), fill=DIM)
+        for i, code in enumerate(i18n.LANGUAGES):
+            col, row = i % 4, i // 4
+            x, y = 140 + col * 260, 230 + row * 110
+            tag = f"lang_{code}"
+            tile = "tile_c.png" if code == (state["lang"] or detected) else ("tile_v.png" if row != 1 else "tile_m.png")
+            canvas.create_image(x - 6, y - 6, image=img(tile), anchor="nw", tags=tag)
+            canvas.create_text(x + 115, y + 40, text=i18n.S[code]["lang_name"], font=font(22, True), fill=TXT, tags=tag)
+            canvas.tag_bind(tag, "<ButtonRelease-1>", lambda e, c=code: choose(c))
+        canvas.create_text(640, 600, text=t("lang_hint"), font=font(18), fill=DIM)
 
     def choose(code):
-        lang["code"] = code
+        state["lang"] = code
         settings["lang"] = code
         save_settings(settings)
         show_main()
 
     # ---- main screen
+    live = {}
+
     def show_main():
-        clear()
-        top = tk.Frame(root, bg=BG)
-        top.pack(fill="x")
-        tk.Button(top, text="A/文  " + t("lang_name"), font=("Sans", 15), command=show_language_picker,
-                  fg=DIM, bg=BG, activebackground=CARD, activeforeground=FG, bd=0,
-                  relief="flat", padx=16, pady=8, highlightthickness=0).pack(side="right", padx=20, pady=14)
-        mode_key = "mode_xbox" if pad.state.get("mode", "xbox") == "xbox" else "mode_generic"
-        tk.Button(top, text="⇄  " + t(mode_key), font=("Sans", 15), command=switch_mode,
-                  fg=DIM, bg=BG, activebackground=CARD, activeforeground=FG, bd=0,
-                  relief="flat", padx=16, pady=8, highlightthickness=0).pack(side="left", padx=20, pady=14)
-        header(root, pady=(0, 4))
-        card = tk.Frame(root, bg=CARD, padx=40, pady=22)
-        card.pack(pady=(6, 0))
-        status = tk.Label(card, text="", font=("Sans", 30, "bold"), bg=CARD)
-        status.pack(pady=(0, 10))
-        detail = tk.Label(card, text="", font=("Sans", 18), fg=DIM, bg=CARD, justify="center")
-        detail.pack()
-        pill_button(root, t("quit"), quit_app, MAGENTA, font_size=22).pack(side="bottom", pady=40)
+        canvas.delete("all")
+        live.clear()
+        canvas.create_image(0, 0, image=img("bg_main.png"), anchor="nw")
+        ox, oy = L["pad_origin"]
+        live["pad"] = canvas.create_image(ox, oy, image=img("pad_dim.png"), anchor="nw")
+        live["btns"] = {i: canvas.create_image(ox, oy, image=img(f"btn_{i}.png"), anchor="nw", state="hidden")
+                        for i in (0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14)}
+        live["sticks"] = [canvas.create_image(*L["left_stick"], image=img("stick_dot.png")),
+                          canvas.create_image(*L["right_stick"], image=img("stick_dot.png"))]
+        canvas.create_image(60, 72, image=img("wordmark_small.png"), anchor="w")
+        canvas.create_image(*L["card_origin"], image=img("card.png"), anchor="nw")
+        live["dot"] = canvas.create_image(92, 190, image=img("dot_cyan.png"))
+        live["title"] = canvas.create_text(116, 190, text="", font=font(32, True), fill=TXT, anchor="w")
+        live["line1"] = canvas.create_text(92, 222, text="", font=font(20), fill=TXT, anchor="nw", width=440)
+        live["line2"] = canvas.create_text(92, 282, text="", font=font(17), fill=DIM, anchor="nw", width=440)
+        xbox = pad.state.get("mode", "xbox") == "xbox"
+        chip_label = t("chip_xbox") if xbox else t("chip_generic")
+        f = font(15, True)
+        cw = next((w for w in L["chip_widths"] if w >= f.measure(chip_label) + 36), L["chip_widths"][-1])
+        canvas.create_image(92 - 6, 326 - 6, image=img(f"chip_{'c' if xbox else 'v'}_{cw}.png"), anchor="nw")
+        canvas.create_text(92 + cw / 2, 326 + 19, text=chip_label, font=f, fill=INK if xbox else TXT)
+        canvas.create_text(92, 392, text=t("rumble"), font=font(15, True), fill=DIM, anchor="w")
+        if xbox:
+            live["bars"] = []
+            for i, (label, color) in enumerate(((t("strong"), "#ff4fd8"), (t("weak"), "#7c4dff"))):
+                x0 = 92 + i * 230
+                canvas.create_text(x0, 418, text=label, font=font(14), fill=DIM, anchor="w")
+                canvas.create_line(x0 + 7, 444, x0 + 193, 444, width=14, capstyle="round", fill="#282246")
+                live["bars"].append((canvas.create_line(x0 + 7, 444, x0 + 8, 444, width=14, capstyle="round",
+                                                        fill=color, state="hidden"), x0 + 7, 186))
+        else:
+            live["bars"] = []
+            canvas.create_text(92, 430, text=t("no_rumble"), font=font(15), fill=DIM, anchor="w")
+        live["foot"] = canvas.create_text(92, 498, text="", font=font(16), fill=DIM, anchor="w", width=440)
+        x = 52
+        x += button(x, 700, "⇄  " + (t("to_generic") if xbox else t("to_xbox")), "v", switch_mode) + 16
+        button(x, 700, "A/文  " + t("lang_name"), "v", show_languages)
+        button(1280 - 52, 696, t("quit"), "m", quit_app, size=19, anchor="ne")
+        live["last"] = {}
+        tick()
 
-        def refresh():
-            if not status.winfo_exists():
-                return
-            s = pad.state
-            if s["link"] == "connected":
-                status.config(text=t("connected"), fg="#4ade80")
-                msg = t("client", ip=s["client"]) if s["client"] else t("client_generic")
-            elif s["link"] == "waiting":
-                status.config(text=t("waiting"), fg=CYAN)
-                device = "Xbox 360 Controller" if s.get("mode") == "xbox" else "DeckRemote"
-                msg = t("waiting_help", ip=own_ip(), bus=s.get("busid") or "…", device=device)
-            else:
-                status.config(text=t("off"), fg="#f87171")
-                msg = t("off_help", err=s["link"])
-            msg += "\n\n" + t("pad", name=s["pad"] or t("pad_none"))
-            msg += "\n" + t("deck_buttons")
-            detail.config(text=msg)
-            root.after(500, refresh)
+    def setv(key, item, **kw):
+        """itemconfigure only when something changed (avoids flicker)."""
+        if live["last"].get(key) != kw:
+            live["last"][key] = kw
+            canvas.itemconfigure(item, **kw)
 
-        refresh()
+    def tick():
+        if "pad" not in live or not canvas.winfo_exists():
+            return
+        s = pad.state
+        link = s["link"] if s["link"] in COLORS else "off"
+        setv("pad", live["pad"], image=img("pad_on.png" if link == "connected" else "pad_dim.png"))
+        setv("dot", live["dot"], image=img(DOTS[link]))
+        setv("title", live["title"], text=t(link), fill=COLORS[link])
+        if link == "connected":
+            setv("l1", live["line1"], text=t("pc", ip=s.get("client") or "?"))
+            setv("l2", live["line2"], text=t("deck_info", ip=own_ip_cached(), bus=s.get("busid") or "…"))
+        elif link == "waiting":
+            setv("l1", live["line1"], text=t("attach", ip=own_ip_cached(), bus=s.get("busid") or "…"))
+            setv("l2", live["line2"], text="")
+        else:
+            setv("l1", live["line1"], text=t("off_help", err=s["link"]))
+            setv("l2", live["line2"], text="")
+        setv("foot", live["foot"], text=t("deck_buttons") if s.get("pad") else t("pad_none"),
+             fill=DIM if s.get("pad") else COLORS["off"])
+        pressed = s.get("buttons", set())
+        for i, item in live["btns"].items():
+            setv(f"b{i}", item, state="normal" if i in pressed else "hidden")
+        ax = s.get("axes", (0,) * 6)
+        travel = L["stick_travel"]
+        for n, (cx, cy) in enumerate((L["left_stick"], L["right_stick"])):
+            canvas.coords(live["sticks"][n], cx + ax[2 * n] / 32767 * travel, cy + ax[2 * n + 1] / 32767 * travel)
+        for (item, x0, length), val in zip(live["bars"], s.get("rumble", (0, 0))):
+            if val:
+                canvas.coords(item, x0, 444, x0 + max(1, length * val / 255), 444)
+            setv(f"bar{item}", item, state="normal" if val else "hidden")
+        root.after(33, tick)
 
-    if lang["code"] in STRINGS:
+    ip_cache = {"ip": None, "t": 0.0}
+
+    def own_ip_cached():
+        if time.monotonic() - ip_cache["t"] > 5:
+            ip_cache["ip"], ip_cache["t"] = own_ip(), time.monotonic()
+        return ip_cache["ip"]
+
+    if state["lang"]:
         show_main()
     else:
-        show_language_picker()
+        show_languages()
+    if "--snap" in sys.argv:  # development: save a screenshot of the window, then quit
+        out = sys.argv[sys.argv.index("--snap") + 1]
+        root.attributes("-topmost", True)
+        root.lift()
+
+        def snap():
+            from PIL import ImageGrab
+            root.update()
+            x, y = canvas.winfo_rootx(), canvas.winfo_rooty()
+            ImageGrab.grab(bbox=(x, y, x + 1280, y + 800)).save(out)
+            quit_app()
+        root.after(int(float(os.environ.get("DECKREMOTE_SNAP_AFTER", "2.5")) * 1000), snap)
     root.mainloop()
 
 
@@ -457,7 +515,8 @@ def main():
         os._exit(0)
 
     signal.signal(signal.SIGTERM, on_signal)
-    signal.signal(signal.SIGHUP, on_signal)
+    if hasattr(signal, "SIGHUP"):  # not on Windows (UI preview with --demo)
+        signal.signal(signal.SIGHUP, on_signal)
     threading.Thread(target=pad.loop, daemon=True).start()
 
     if HEADLESS:
