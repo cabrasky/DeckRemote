@@ -24,6 +24,7 @@
 3. Un hilo abre con SDL2 el **"Steam Virtual Gamepad"**, el mando que Steam da a los juegos. Cada 4 ms escribe en `/dev/hidg0` botones, cruceta, sticks y gatillos: en cada cambio, y como mínimo cada 100 ms. La escritura no bloquea, así que la interfaz no se congela aunque no haya ningún PC conectado.
 4. La interfaz (Tk a pantalla completa) consulta `gadget.sh status` cada segundo. Cuando hay un PC conectado muestra su IP, que saca con `ss` de las conexiones al puerto 3240.
 5. Al salir (con el botón, con el `SIGTERM` de Steam o cerrando la ventana), la app envía un informe neutro y ejecuta `gadget.sh down`.
+6. Si la app muere sin poder recoger (Steam se reinicia, `SIGKILL`), la pilla un pequeño **vigilante**: una unidad de usuario temporal `deckremote-guard-<pid>` que arranca con la app. Espera a que desaparezca el PID de la app, ejecuta `gadget.sh down` y se cierra. Nunca dura más de ~2 segundos después de la app.
 
 ## Informe HID (13 bytes, sin report ID)
 

@@ -337,9 +337,27 @@ def run_ui(pad, stop):
     root.mainloop()
 
 
+def start_guard():
+    """If this app dies without cleaning up (e.g. Steam kills it), shut the virtual gamepad down.
+
+    Runs as a transient *user* unit so it survives Steam killing the game's process tree, and
+    it exits on its own right after the app does. It only acts when no DeckRemote is running.
+    """
+    pid = os.getpid()
+    script = (f"while kill -0 {pid} 2>/dev/null; do sleep 2; done; "
+              f"pgrep -f '^[^ ]*python3? [^ ]*deckremote[.]py' >/dev/null || sudo -n {HELPER} down >/dev/null 2>&1")
+    try:
+        subprocess.Popen(["systemd-run", "--user", "--collect", "--quiet", f"--unit=deckremote-guard-{pid}",
+                          "/bin/sh", "-c", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
+
+
 def main():
     pad = DemoPad() if DEMO else Pad()
     up = "demo" if DEMO else helper("up")
+    if not DEMO:
+        start_guard()
     stopped = threading.Event()
 
     def stop(*_):

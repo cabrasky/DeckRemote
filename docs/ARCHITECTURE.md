@@ -24,6 +24,7 @@
 3. A worker thread opens the **"Steam Virtual Gamepad"** with SDL2 (the controller Steam gives to games). Every 4 ms it writes the buttons, hat, sticks and triggers to `/dev/hidg0`: on every change, and at least every 100 ms. Writes are non-blocking, so the UI never freezes while no PC is attached.
 4. The UI (full-screen Tk) polls `gadget.sh status` every second. When a PC is attached it shows the PC's IP, read with `ss` from the connections on port 3240.
 5. On exit (the button, Steam's `SIGTERM` or closing the window) the app sends a neutral report and runs `gadget.sh down`.
+6. If the app is killed without a chance to clean up (Steam restarting, `SIGKILL`), a tiny **guard** catches it. The guard is a transient user unit `deckremote-guard-<pid>`, started with the app, that waits for the app's PID to disappear, runs `gadget.sh down` and exits. It never outlives the app by more than ~2 seconds.
 
 ## HID report (13 bytes, no report ID)
 
