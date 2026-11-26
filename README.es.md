@@ -185,3 +185,7 @@ docs/
 - En la Deck, sin interfaz y con el estado por terminal: `python3 ~/DeckRemote/deckremote.py --headless`.
 - Regenerar el arte: `python tools/make_art.py`, y después las imágenes de la interfaz: `python tools/make_ui.py` (los dos necesitan Pillow).
 - Las traducciones están en `deck/i18n.py`: copia el bloque `en`, tradúcelo y añade el nombre del idioma en Steam a `STEAM_LANGUAGES`.
+
+## Licencia
+
+[MIT](LICENSE) © 2026 Javier Mateos. Los descriptores USB del mando de Xbox 360 de `deck/xinput.py` están adaptados de [GP2040-CE](https://github.com/OpenStickCommunity/GP2040-CE) (MIT). DeckRemote no tiene relación con Valve ni con Microsoft.

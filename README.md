@@ -186,3 +186,7 @@ docs/
 - Headless run on the Deck, with status printed to the terminal: `python3 ~/DeckRemote/deckremote.py --headless`.
 - Regenerate the artwork: `python tools/make_art.py`, then the UI images: `python tools/make_ui.py` (both need Pillow).
 - Translations live in `deck/i18n.py`: copy the `en` block, translate it and add the Steam language name to `STEAM_LANGUAGES`.
+
+## License
+
+[MIT](LICENSE) © 2026 Javier Mateos. The Xbox 360 USB descriptors in `deck/xinput.py` are adapted from [GP2040-CE](https://github.com/OpenStickCommunity/GP2040-CE) (MIT). DeckRemote isn't affiliated with Valve or Microsoft.
