@@ -1,0 +1,6 @@
+DeckRemote
+Copyright (c) 2026 Javier Mateos
+
+deck/xinput.py includes Xbox 360 USB descriptor data adapted from GP2040-CE
+(https://github.com/OpenStickCommunity/GP2040-CE), used under the MIT License:
+Copyright (c) 2021 Jason Skuby (mytechtoybox.com).

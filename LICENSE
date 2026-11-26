@@ -19,9 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-deck/xinput.py includes Xbox 360 USB descriptor data adapted from GP2040-CE
-(https://github.com/OpenStickCommunity/GP2040-CE), used under the MIT License:
-Copyright (c) 2021 Jason Skuby (mytechtoybox.com).
